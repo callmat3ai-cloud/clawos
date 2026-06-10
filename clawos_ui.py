@@ -1432,6 +1432,20 @@ class ClawOSWindow(QMainWindow):
         self._orb_state_lbl.setStyleSheet(f"color: {C.get('GREEN')}; font-size: 11px; font-weight: 600;")
         v.addWidget(self._orb_state_lbl)
 
+        # YOLO mode badge
+        self._yolo_badge = QLabel("⚡ YOLO")
+        self._yolo_badge.setStyleSheet(f"""
+            color: {C.get('ACC')};
+            background: {C.get('ACC_GHO')};
+            border: 1px solid {C.get('ACC')};
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            """)
+        self._yolo_badge.setVisible(False)
+        v.addWidget(self._yolo_badge)
+
         return panel
 
     def _make_metric_bar(self, label: str) -> QWidget:
@@ -1916,9 +1930,11 @@ class ClawOSWindow(QMainWindow):
         self._log_activity(f"Response complete")
 
     # Thread-safe approval handling
-    _approval_signal = None  # set in __init__
+    _approval_resolver = None  # set by main.py: executor.set_approval_result
+    _yolo_mode = False
 
     def _on_approval_request(self, action: str):
+        """Called when executor needs approval — shows dialog, resolves to executor."""
         from PyQt6.QtCore import QTimer
         self._last_approval_result = False
 
@@ -1926,9 +1942,9 @@ class ClawOSWindow(QMainWindow):
             dialog = ApprovalDialog(action, self)
             result = dialog.exec() == QDialog.DialogCode.Accepted
             self._last_approval_result = result
-            # Signal executor thread to continue
-            if self._approval_signal is not None:
-                self._approval_signal.emit(result)
+            # Tell executor to resume with the result
+            if self._approval_resolver is not None:
+                self._approval_resolver(result)
 
         QTimer.singleShot(0, show_dialog)
 
@@ -1963,6 +1979,11 @@ class ClawOSWindow(QMainWindow):
         }
         self._orb_state_lbl.setText(labels.get(state, "● Idle"))
         self._orb_state_lbl.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 600;")
+
+    def _set_yolo_mode(self, enabled: bool):
+        """Show/hide the YOLO badge."""
+        self._yolo_mode = enabled
+        self._yolo_badge.setVisible(enabled)
 
     def _toggle_streaming(self):
         self._streaming_enabled = not self._streaming_enabled

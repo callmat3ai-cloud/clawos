@@ -1,13 +1,14 @@
 """
 StreamingExecutor — agentic execution with token streaming, approval gates,
-command allowlist, and secret redaction.
+slash commands, yolo mode, and secret redaction.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
-import time
+import threading
 import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -29,7 +30,7 @@ REDACT_PATTERNS = [
     (re.compile(r'\+?[1-9]\d{1,14}'), '[PHONE_REDACTED]'),
     (re.compile(r'Bearer [A-Za-z0-9._-]+'), 'Bearer ***REDACTED***'),
     (re.compile(r'api[_-]?key["\s:=]+[A-Za-z0-9_-]{10,}'), 'api_key=***REDACTED***'),
-    (re.compile(r'password["\s:=]+[^\s"\'`]{8,}'), 'password=***REDACTED***'),
+    (re.compile(r'password["\s:=]+[^\s"`]{8,}'), 'password=***REDACTED***'),
     (re.compile(r'token["\s:=]+[A-Za-z0-9._-]{10,}'), 'token=***REDACTED***'),
 ]
 
@@ -87,26 +88,40 @@ class ApprovalGate:
         self.timeout = config.get("timeout_seconds", 60)
         self.skip_trusted = config.get("skip_trusted_actions", False)
         self._pending: list[tuple[str, dict, Callable]] = []
-        self._result: Optional[bool] = None
 
-    def should_ask(self, tool: str) -> bool:
+    def should_ask(self, tool: str, yolo: bool = False) -> bool:
         """Decide if we need approval for this tool."""
+        if yolo:
+            return False  # YOLO: skip everything
         if self.mode == "off":
             return False
         if self.mode == "auto" and tool not in DANGEROUS_TOOLS:
             return False
         return True
 
-    def request(self, tool: str, args: dict, on_show_dialog: Callable[[str], bool]) -> bool:
-        """Request approval. Returns True if approved, False if rejected."""
-        if not self.should_ask(tool):
+    def request(
+        self,
+        tool: str,
+        args: dict,
+        on_show_dialog: Callable[[str], None],
+        wait_for_result: Callable[[], bool],
+        yolo: bool = False,
+    ) -> bool:
+        """
+        Request approval. Shows dialog via on_show_dialog (non-blocking),
+        then waits for result via wait_for_result.
+        Returns True if approved, False if rejected.
+        """
+        if not self.should_ask(tool, yolo):
             return True
 
         action_desc = describe_action(tool, args)
 
         if self.mode == "manual":
-            # Show PyQt dialog — called from main thread via signal
-            return on_show_dialog(action_desc)
+            # Tell UI to show dialog (non-blocking)
+            on_show_dialog(action_desc)
+            # Wait for user decision
+            return wait_for_result()
         return True  # auto mode: approve
 
 
@@ -160,7 +175,6 @@ class ToolRegistry:
             from integrations.composio_mcp import get_composio
             comp = get_composio()
             query = args.get("query", "")
-            # Use composio search
             return f"🔍 Searched for: {query}\n\n[Tool result would appear here — connect Composio API key in Settings → Messaging]"
         except Exception as e:
             return f"🔍 Search: {e}"
@@ -226,7 +240,7 @@ class ToolRegistry:
                 timeout=10,
             )
             if resp.status_code == 200:
-                return f"✅ Telegram message sent"
+                return "✅ Telegram message sent"
             return f"⚠️ Telegram error: {resp.status_code}"
         except Exception as e:
             return f"❌ Telegram failed: {str(e)[:100]}"
@@ -261,7 +275,6 @@ class ToolRegistry:
         try:
             keys = self._load_keys()
             location_id = keys.get("ghl_location_id", "")
-            # Use GHL MCP or direct API
             return f"📞 GHL: Would send to contact {contact_id}: {body[:50]}... (GHL integration ready — configure Location ID in Settings)"
         except Exception as e:
             return f"❌ GHL failed: {str(e)[:100]}"
@@ -359,30 +372,45 @@ class ToolRegistry:
         except Exception:
             return {}
 
-    def _load_settings(self) -> dict:
-        try:
-            from pathlib import Path
-            settings_file = Path(__file__).resolve().parent.parent / "config" / "app_settings_v2.json"
-            return json.loads(settings_file.read_text()) if settings_file.exists() else {}
-        except Exception:
-            return {}
 
-
-# ── Singleton helpers ───────────────────────────────────────────────
+# ── Execution Result ─────────────────────────────────────────────────
 
 @dataclass
 class ExecutionResult:
     text: str = ""
     actions_used: list[str] = field(default_factory=list)
     action_results: list[str] = field(default_factory=list)
+    yolo: bool = False
     error: Optional[str] = None
 
+
+# ── Slash Command Parser ─────────────────────────────────────────────
+
+SLASH_COMMANDS = {"/yolo", "/cron", "/monitor", "/status", "/cancel"}
+
+
+def parse_slash_command(text: str) -> tuple[bool, str]:
+    """
+    Parse slash commands from input.
+    Returns (is_yolo, cleaned_text).
+    Strips /yolo prefix, passes other commands through for the LLM to handle.
+    """
+    stripped = text.strip()
+    if stripped.lower().startswith("/yolo"):
+        rest = stripped[5:].strip()
+        return True, rest or ""
+    return False, text
+
+
+# ── Streaming Executor ───────────────────────────────────────────────
 
 class StreamingExecutor:
     """
     Main agent executor with:
     - Streaming token output via callback
-    - Approval mode gating
+    - Async approval gating (pause → resume)
+    - YOLO mode (skip all approvals)
+    - Slash command support (/yolo, /cron, /monitor, etc.)
     - Command allowlist enforcement
     - Secret redaction
     - Multi-step planning
@@ -392,20 +420,49 @@ class StreamingExecutor:
         self.approval = ApprovalGate(approval_config)
         self.tools = ToolRegistry(approval_config.get("allowed_tools", []))
         self.redact_enabled = approval_config.get("redact_secrets", True)
-        self._approval_callback: Optional[Callable[[str], bool]] = None
         self._max_steps = approval_config.get("max_agent_steps", 90)
-        self._subagent_max_parallel = approval_config.get("subagent_max_parallel", 3)
-        self._subagent_timeout = approval_config.get("subagent_timeout", 600)
 
-    def set_approval_callback(self, cb: Callable[[str], bool]):
-        self._approval_callback = cb
+        # ── YOLO mode ──────────────────────────────────────────────
+        self._yolo_mode = False
+
+        # ── Async approval state ────────────────────────────────────
+        self._approval_event = threading.Event()
+        self._approval_result: bool = False
+        self._pending_action: str = ""
+
+        # ── Approval callbacks (set by main.py) ────────────────────
+        self._on_show_approval: Optional[Callable[[str], None]] = None
+        self._on_approval_done: Optional[Callable[[bool], None]] = None
+
+    def enable_yolo(self):
+        """Enable YOLO mode — skips all approval gates for this session."""
+        self._yolo_mode = True
+        log.info("⚡ YOLO mode enabled — all approvals bypassed")
+
+    def set_approval_callbacks(
+        self,
+        on_show: Callable[[str], None],
+        on_done: Callable[[bool], None],
+    ):
+        """Set callbacks for showing approval dialogs and reporting results."""
+        self._on_show_approval = on_show
+        self._on_approval_done = on_done
+
+    def set_approval_result(self, approved: bool):
+        """
+        Called by the UI when user approves or rejects.
+        Unblocks the executor thread.
+        """
+        self._approval_result = approved
+        self._approval_event.set()
+        if self._on_approval_done:
+            self._on_approval_done(approved)
 
     def execute(
         self,
         goal: str,
         on_token: Optional[Callable[[str], None]] = None,
         on_complete: Optional[Callable[[str], None]] = None,
-        on_approval: Optional[Callable[[str], None]] = None,
         memory_context: str = "",
         composio_context: str = "",
     ) -> ExecutionResult:
@@ -413,34 +470,58 @@ class StreamingExecutor:
         Execute a goal with streaming output.
 
         Args:
-            goal: User's request
+            goal: User's request (may start with /yolo or other slash commands)
             on_token: Called with each response token (for streaming UI)
             on_complete: Called when done with full response text
-            on_approval: Called to show approval dialog, returns bool
             memory_context: Prior conversation context
-            composio_context: Available Composio tools
+            composio_context: Available Composio/MCP tools
         """
         result = ExecutionResult()
         full_response = []
 
+        # ── Parse slash commands ─────────────────────────────────
+        is_yolo, clean_goal = parse_slash_command(goal)
+        if is_yolo:
+            self.enable_yolo()
+        if not clean_goal:
+            # Just /yolo with no task — show status
+            result.text = "⚡ YOLO mode active — all approval gates will be skipped for this session."
+            if on_complete:
+                on_complete(result.text)
+            return result
+
+        # ── Emit helpers ─────────────────────────────────────────
         def emit(text: str):
             full_response.append(text)
             if on_token:
                 on_token(text)
 
-        # Build system prompt
-        system = self._build_system_prompt(composio_context)
-        user_msg = self._build_user_message(goal, memory_context)
+        # ── Approval helpers (non-blocking) ─────────────────────
+        def on_show_dialog(action: str):
+            self._pending_action = action
+            if self._on_show_approval:
+                self._on_show_approval(action)
 
+        def wait_for_result() -> bool:
+            # Block this thread until UI sets result
+            approved = self._approval_event.wait(timeout=self.approval.timeout)
+            self._approval_event.clear()
+            if not approved:
+                log.info("Approval rejected or timed out")
+            return approved
+
+        # ── Build prompts ────────────────────────────────────────
+        system = self._build_system_prompt(composio_context)
+        user_msg = self._build_user_message(clean_goal, memory_context)
+
+        # ── Call LLM ─────────────────────────────────────────────
         try:
-            # Try streaming with OpenRouter-compatible API
             response = self._stream_response(system, user_msg, on_token)
         except Exception as e:
             log.error(f"Streaming failed: {traceback.format_exc()}")
-            # Fallback: non-streaming
             response = self._non_stream_response(system, user_msg)
 
-        # Process response
+        # ── Process response ─────────────────────────────────────
         if response:
             text = response.get("text", response.get("content", ""))
             if self.redact_enabled:
@@ -460,29 +541,27 @@ class StreamingExecutor:
 
                 if not self.tools.is_allowed(tool):
                     tool_result = f"⛔ '{tool}' is not in your allowlist"
-                elif self.approval.should_ask(tool):
-                    # Request approval via callback
-                    action_desc = describe_action(tool, args)
-                    if on_approval:
-                        approved = on_approval(action_desc)
-                    else:
-                        approved = True
-
-                    if not approved:
-                        tool_result = f"⛔ Action '{tool}' was rejected"
-                    else:
+                else:
+                    # ── Async approval gate ──────────────────────
+                    tool_result = self.approval.request(
+                        tool=tool,
+                        args=args,
+                        on_show_dialog=on_show_dialog,
+                        wait_for_result=wait_for_result,
+                        yolo=self._yolo_mode,
+                    )
+                    if tool_result:  # approved (or yolo'd)
                         tool_result = self.tools.execute(tool, args)
                         if self.redact_enabled:
                             tool_result = redact(tool_result)
-                else:
-                    tool_result = self.tools.execute(tool, args)
-                    if self.redact_enabled:
-                        tool_result = redact(tool_result)
+                    else:
+                        tool_result = f"⛔ Action '{tool}' was rejected by user"
 
                 emit(f"\n\n{tool_result}")
                 result.action_results.append(tool_result)
 
         result.text = "".join(full_response)
+        result.yolo = self._yolo_mode
         if on_complete:
             on_complete(result.text)
 
@@ -490,24 +569,26 @@ class StreamingExecutor:
 
     def _build_system_prompt(self, composio_context: str) -> str:
         allowed = list(self.tools._allowed)
+        yolo_note = "\n⚡ YOLO MODE: All approval gates are bypassed. Act freely." if self._yolo_mode else ""
         return f"""You are ClawOS, a desktop AI agent. You help users by:
 - Searching the web
 - Sending messages (WhatsApp, Email, Telegram, GHL)
-- Setting reminders
+- Setting reminders and cron jobs
 - Controlling their computer
 - Running code and scripts
 - Managing files
+- Creating background monitors (/monitor) and scheduled tasks (/cron)
 
 Available tools: {', '.join(allowed)}
+{composio_context}
 
 You MUST use tools when a user asks for something actionable. For simple questions, respond directly.
 
 Important rules:
 - If a tool is blocked (⛔), explain why and suggest how to enable it in Settings
-- Always confirm dangerous actions with the user
 - Keep responses concise and helpful
 - NEVER reveal API keys or secrets
-{composio_context}"""
+{yolo_note}"""
 
     def _build_user_message(self, goal: str, memory_context: str) -> str:
         msg = goal
@@ -524,14 +605,13 @@ Important rules:
         """Streaming LLM call via the providers system."""
         try:
             from integrations.providers import (
-                get_all_providers, get_api_key, get_base_url, get_default_model,
-                chat_completion_streaming, _load_settings as _ls,
+                get_api_key, get_default_model, chat_completion_streaming,
             )
+            import threading as _t
 
             settings = self._load_settings()
             provider = settings.get("llm_provider", "anthropic")
             model = settings.get("llm_model", "") or get_default_model(provider)
-
             api_key = get_api_key(provider)
             if not api_key:
                 return self._fallback_response(user_msg)
@@ -554,11 +634,8 @@ Important rules:
                 max_tokens=4096,
                 api_key=api_key,
             )
-
             return {"content": full_text}
 
-        except ImportError:
-            return self._fallback_response(user_msg)
         except Exception as e:
             log.error(f"LLM streaming error: {traceback.format_exc()}")
             return self._fallback_response(user_msg)
@@ -574,7 +651,6 @@ Important rules:
             provider = settings.get("llm_provider", "anthropic")
             model = settings.get("llm_model", "") or get_default_model(provider)
             api_key = get_api_key(provider)
-
             if not api_key:
                 return self._fallback_response(user_msg)
 
@@ -582,7 +658,6 @@ Important rules:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_msg},
             ]
-
             text = chat_completion(
                 provider=provider,
                 model=model,
@@ -591,7 +666,6 @@ Important rules:
                 max_tokens=4096,
                 api_key=api_key,
             )
-
             return {"content": text}
 
         except Exception:
@@ -601,16 +675,41 @@ Important rules:
         """Rule-based fallback when no API keys are configured."""
         msg = user_msg.lower()
 
-        # Smart routing based on keywords
-        if any(k in msg for k in ["send", "whatsapp", "message to", "text to"]):
+        if any(k in msg for k in ["/yolo"]):
+            return {"content": "⚡ YOLO mode activated. What would you like me to do?"}
+        elif any(k in msg for k in ["/cron", "/schedule", "/remind", "every "]):
+            return {
+                "content": (
+                    "⏰ I can create scheduled tasks from natural language.\n\n"
+                    "Try: `/cron every Monday at 9am remind me to check email`\n"
+                    "Or just tell me naturally: `every 5 minutes check if google.com is up`"
+                )
+            }
+        elif any(k in msg for k in ["/monitor", "check every", "watch", "monitor"]):
+            return {
+                "content": (
+                    "👁️ I can monitor URLs, files, and processes in the background.\n\n"
+                    "Try: `/monitor check google.com every 10 minutes`\n"
+                    "Or: `watch /tmp/log.txt for changes`"
+                )
+            }
+        elif any(k in msg for k in ["/status"]):
+            return {
+                "content": (
+                    "📊 ClawOS Status:\n"
+                    "⚡ YOLO: " + ("ON" if self._yolo_mode else "OFF") + "\n"
+                    "All systems operational.\n"
+                    "Use /status to see this dashboard."
+                )
+            }
+        elif any(k in msg for k in ["send", "whatsapp", "message to", "text to"]):
             return {
                 "content": (
                     "📱 I can send messages via WhatsApp, Email, Telegram, or GHL.\n\n"
                     "To get started:\n"
                     "1. Open Settings (⚙️) → Messaging\n"
                     "2. Add your WhatsApp (Evolution API), Email (SMTP), or Telegram credentials\n"
-                    "3. Then say: \"Send a WhatsApp message to [contact]\"\n\n"
-                    "For WhatsApp, you'll need the Evolution API running on your VPS at port 8081."
+                    "3. Then say: \"Send a WhatsApp message to [contact]\""
                 )
             }
         elif any(k in msg for k in ["search", "find", "look up", "what is", "who is", "how to"]):
@@ -622,22 +721,6 @@ Important rules:
                     "3. Then I'll be able to search the web for you."
                 )
             }
-        elif any(k in msg for k in ["remind", "reminder", "alarm", "schedule"]):
-            return {
-                "content": (
-                    "⏰ Reminders are handled by the ClawOS task scheduler.\n\n"
-                    "Try: \"Set a reminder for tomorrow at 9am to call Mom\"\n\n"
-                    "I'll schedule it and notify you when the time comes."
-                )
-            }
-        elif any(k in msg for k in ["open", "launch", "start"]):
-            return {
-                "content": (
-                    "🖥️ I can open apps on your computer.\n\n"
-                    "Try: \"Open Chrome and go to gmail.com\"\n"
-                    "Or: \"Open Safari\""
-                )
-            }
         else:
             return {
                 "content": (
@@ -645,12 +728,17 @@ Important rules:
                     "I can help you with:\n"
                     "• 📱 Sending messages (WhatsApp, Email, Telegram, GHL)\n"
                     "• 🔍 Searching the web\n"
-                    "• ⏰ Setting reminders\n"
+                    "• ⏰ Setting reminders and cron jobs\n"
                     "• 🖥️ Opening apps\n"
                     "• 💻 Running code\n"
-                    "• 📁 Managing files\n\n"
-                    "Configure your integrations in ⚙️ Settings to unlock full capabilities.\n"
-                    "Add API keys in Settings → 🤖 AI Providers."
+                    "• 📁 Managing files\n"
+                    "• 👁️ Monitoring URLs/processes\n\n"
+                    "Slash commands:\n"
+                    "• /yolo — skip all approvals\n"
+                    "• /cron — create a scheduled task\n"
+                    "• /monitor — create a background monitor\n"
+                    "• /status — show all active tasks\n\n"
+                    "Configure your integrations in ⚙️ Settings to unlock full capabilities."
                 )
             }
 
@@ -674,10 +762,10 @@ Important rules:
 
         return tool_calls
 
-    def _load_keys(self) -> dict:
+    def _load_settings(self) -> dict:
         try:
             from pathlib import Path
-            keys_file = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
-            return json.loads(keys_file.read_text()) if keys_file.exists() else {}
+            settings_file = Path(__file__).resolve().parent.parent / "config" / "app_settings_v2.json"
+            return json.loads(settings_file.read_text()) if settings_file.exists() else {}
         except Exception:
             return {}

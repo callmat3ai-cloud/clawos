@@ -103,6 +103,7 @@ class ClawOSApp:
         self._init_subagents()
         self._init_messaging()
         self._init_mcp()
+        self._init_proactive()
 
     def _init_voice(self):
         """Phase 3: Initialize voice engine."""
@@ -179,6 +180,46 @@ class ClawOSApp:
         except Exception as e:
             log.warning(f"MCP init failed: {e}")
 
+    def _init_proactive(self):
+        """Proactive agent: scheduler + monitors + background loop."""
+        try:
+            from proactive.background_loop import ProactiveBackgroundLoop
+            self._proactive = ProactiveBackgroundLoop(
+                on_alert=self._on_proactive_alert,
+                on_task_fire=self._on_task_fire,
+            )
+            self._proactive.start()
+            self.window._proactive = self._proactive
+            log.info("✅ Proactive agent ready")
+        except Exception as e:
+            log.warning(f"Proactive init failed: {e}")
+
+    def _on_proactive_alert(self, alert):
+        """Surface proactive alerts to the UI."""
+        if hasattr(self.window, "_add_message"):
+            self.window._add_message(
+                "assistant",
+                f"{alert.title}\n{alert.body}",
+            )
+        if hasattr(self.window, "_log_activity"):
+            self.window._log_activity(f"Alert: {alert.title}")
+
+    def _on_task_fire(self, task: dict):
+        """Handle fired scheduled tasks."""
+        if hasattr(self.window, "_add_message"):
+            self.window._add_message(
+                "assistant",
+                f"⏰ *Task fired:* {task.get('description', 'Scheduled task')}",
+            )
+
+    def _on_state_change(self, state: str):
+        """Sync proactive triggers with UI state."""
+        orb_active = (state == "listening")
+        streaming_active = (state == "processing")
+        if hasattr(self, "_proactive") and self._proactive:
+            self._proactive.set_orb_active(orb_active)
+            self._proactive.set_streaming_active(streaming_active)
+
     def start(self):
         app = QApplication(sys.argv)
         app.setApplicationName("ClawOS")
@@ -208,6 +249,11 @@ class ClawOSApp:
     def _handle_send(self, text: str):
         if not text.strip():
             return
+        # Detect /yolo and update badge
+        from agent.streaming_executor import parse_slash_command
+        is_yolo, clean = parse_slash_command(text)
+        if is_yolo:
+            self.window._set_yolo_mode(True)
         self.window._center_input.clear()
         self.window._add_message("user", text)
         self._process_message(text)
@@ -220,6 +266,9 @@ class ClawOSApp:
         self._processing = True
         self.window._set_orb_state("processing")
         self.window._log_activity(f"Sent: {text[:60]}")
+        # Trigger proactive background loop
+        if hasattr(self, "_proactive") and self._proactive:
+            self._proactive.set_streaming_active(True)
 
         # Load context
         try:
@@ -264,14 +313,21 @@ class ClawOSApp:
                 def on_complete(text: str):
                     self.window.response_complete.emit()
 
-                def on_approval(action: str):
+                def on_show_approval(action: str):
                     self.window.approval_request.emit(action)
+
+                # Wire callbacks
+                executor.set_approval_callbacks(
+                    on_show=on_show_approval,
+                    on_done=lambda approved: setattr(executor, '_approval_result', approved),
+                )
+                # Wire UI approval result → executor
+                self.window._approval_resolver = executor.set_approval_result
 
                 result = executor.execute(
                     goal=text,
                     on_token=on_token,
                     on_complete=on_complete,
-                    on_approval=on_approval,
                     memory_context=memory_ctx,
                     composio_context=composio_ctx,
                 )
@@ -298,6 +354,11 @@ class ClawOSApp:
     def _on_complete(self, text: str = ""):
         self._processing = False
         self.window._set_orb_state("idle")
+        self.window._log_activity(f"Response ready")
+        # Stop proactive streaming trigger
+        if hasattr(self, "_proactive") and self._proactive:
+            self._proactive.set_streaming_active(False)
+        # Cleanup streaming bubble
         if hasattr(self.window, "_current_bubble") and self.window._current_bubble:
             b = self.window._current_bubble
             if hasattr(b, "_streaming_done"):
