@@ -513,70 +513,81 @@ Important rules:
         user_msg: str,
         on_token: Optional[Callable[[str], None]],
     ) -> dict:
-        """Try to get a streaming response from OpenRouter."""
+        """Streaming LLM call via the providers system."""
         try:
-            import requests
+            from integrations.providers import (
+                get_all_providers, get_api_key, get_base_url, get_default_model,
+                chat_completion_streaming,
+            )
 
-            keys = self._load_keys()
-            api_key = keys.get("openrouter_api_key", "")
-            model = keys.get("openrouter_model", "anthropic/claude-3.5-haiku")
+            settings = self._load_settings()
+            provider = settings.get("llm_provider", "anthropic")
+            model = settings.get("llm_model", "") or get_default_model(provider)
+
+            api_key = get_api_key(provider)
+            if not api_key:
+                return self._fallback_response(user_msg)
+
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ]
+
+            def token_cb(token: str):
+                if on_token:
+                    on_token(token)
+
+            full_text = chat_completion_streaming(
+                provider=provider,
+                model=model,
+                messages=messages,
+                on_token=token_cb,
+                temperature=0.7,
+                max_tokens=4096,
+                api_key=api_key,
+            )
+
+            return {"content": full_text}
+
+        except ImportError:
+            return self._fallback_response(user_msg)
+        except Exception as e:
+            log.error(f"LLM streaming error: {traceback.format_exc()}")
+            return self._fallback_response(user_msg)
+
+    def _non_stream_response(self, system: str, user_msg: str) -> dict:
+        """Non-streaming LLM call via providers."""
+        try:
+            from integrations.providers import (
+                get_api_key, get_default_model, chat_completion,
+            )
+
+            settings = self._load_settings()
+            provider = settings.get("llm_provider", "anthropic")
+            model = settings.get("llm_model", "") or get_default_model(provider)
+            api_key = get_api_key(provider)
 
             if not api_key:
                 return self._fallback_response(user_msg)
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://clawops.studio",
-                "X-Title": "ClawOS",
-            }
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ]
 
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_msg},
-                ],
-                "stream": True,
-            }
-
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                stream=True,
-                timeout=60,
+            text = chat_completion(
+                provider=provider,
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=4096,
+                api_key=api_key,
             )
 
-            if response.status_code != 200:
-                return self._fallback_response(user_msg)
+            return {"content": text}
 
-            full_content = ""
-            for line in response.iter_lines():
-                if not line:
-                    continue
-                line = line.decode("utf-8")
-                if line.startswith("data: "):
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        token = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                        if token and on_token:
-                            on_token(token)
-                        full_content += token
-                    except json.JSONDecodeError:
-                        continue
-
-            return {"content": full_content}
-
-        except Exception as e:
-            log.error(f"Streaming error: {e}")
+        except Exception:
             return self._fallback_response(user_msg)
-
-    def _non_stream_response(self, system: str, user_msg: str) -> dict:
-        return self._fallback_response(user_msg)
 
     def _fallback_response(self, user_msg: str) -> dict:
         """Rule-based fallback when no API keys are configured."""
