@@ -45,9 +45,20 @@ if [ "$PY_MAJOR" -lt 3 ] || ([ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]); t
     fi
 fi
 
-# Step 1: Create virtual environment
+# macOS: install portaudio BEFORE pip (needed to build pyaudio/sounddevice)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "📦 Step 1b: Installing macOS audio dependencies..."
+    if command -v brew &> /dev/null; then
+        brew install portaudio 2>/dev/null || true
+        echo "   ✅ portaudio installed"
+    else
+        echo "   ⚠️  Homebrew not found — voice input will be disabled"
+    fi
+fi
+
+# Step 2: Create virtual environment
 echo ""
-echo "📦 Step 1: Creating virtual environment..."
+echo "📦 Step 2: Creating virtual environment..."
 if [ -d "venv" ]; then
     echo "   (Removing existing venv)"
     rm -rf venv
@@ -55,26 +66,13 @@ fi
 $PYTHON -m venv venv
 source venv/bin/activate
 
-# Step 2: Upgrade pip
-echo "📦 Step 2: Upgrading pip..."
+# Step 3: Upgrade pip
+echo "📦 Step 3: Upgrading pip..."
 pip install --upgrade pip
 
-# Step 3: Install requirements
-echo "📦 Step 3: Installing dependencies..."
-pip install --upgrade pip
+# Step 4: Install requirements
+echo "📦 Step 4: Installing Python dependencies..."
 pip install -r requirements.txt
-
-# macOS: install portaudio for sounddevice
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "📦 Step 3b: Installing macOS audio dependencies..."
-    if command -v brew &> /dev/null; then
-        brew install portaudio 2>/dev/null || true
-        echo "   ✅ portaudio installed (or already present)"
-    else
-        echo "   ⚠️  Homebrew not found — install portaudio manually if voice doesn't work"
-        echo "       brew install portaudio"
-    fi
-fi
 
 # Step 4: Create config directory
 echo "📦 Step 4: Creating config..."

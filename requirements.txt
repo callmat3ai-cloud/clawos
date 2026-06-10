@@ -9,9 +9,9 @@ google-genai>=0.8.0
 requests>=2.31.0
 httpx>=0.27.0
 
-# Voice
-sounddevice>=0.4.7
-pyaudio>=0.2.14
+# Voice (optional — requires portaudio: brew install portaudio)
+# sounddevice>=0.4.7
+# pyaudio>=0.2.14
 
 # Computer control
 pyautogui>=0.9.54
