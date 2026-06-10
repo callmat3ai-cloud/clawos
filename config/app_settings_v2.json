@@ -1,0 +1,35 @@
+{
+  "llm_provider": "anthropic",
+  "llm_model": "claude-sonnet-4-6",
+  "streaming": true,
+  "theme": "dark",
+  "agent_profile": "assistant",
+  "voice_enabled": false,
+  "tts_engine": "edge",
+  "stt_engine": "whisper",
+  "approval_mode": "manual",
+  "approval_timeout": 60,
+  "memory_budget_tokens": 2200,
+  "proactive_agent": false,
+  "provider_base_urls": {},
+  "custom_providers": {
+    "codemax": {
+      "name": "CodeMax",
+      "emoji": "⚡",
+      "api_base": "https://api.codemax.pro/v1",
+      "auth_header": "Bearer",
+      "env_key": "CODEMAX_API_KEY",
+      "default_model": "claude-sonnet-4-6",
+      "supports_streaming": true,
+      "supports_vision": true,
+      "custom": true,
+      "models": [
+        {"id": "claude-opus-4-7",    "name": "Claude Opus 4.7",   "context": 200000, "input": 3.00,  "output": 15.00},
+        {"id": "claude-sonnet-4-6",  "name": "Claude Sonnet 4.6", "context": 200000, "input": 3.00,  "output": 15.00},
+        {"id": "claude-3-5-haiku",   "name": "Claude 3.5 Haiku",  "context": 200000, "input": 0.80,  "output": 4.00},
+        {"id": "gpt-4o",             "name": "GPT-4o",            "context": 128000, "input": 2.50,  "output": 10.00},
+        {"id": "gpt-4o-mini",        "name": "GPT-4o Mini",       "context": 128000, "input": 0.15,  "output": 0.60}
+      ]
+    }
+  }
+}

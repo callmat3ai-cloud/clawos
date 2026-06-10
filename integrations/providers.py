@@ -276,56 +276,38 @@ PROVIDERS = {
         ],
     },
 
-    # ── CodeMax (ClawOps) ─────────────────────────────────────────────────
-    # Points to codemax.pro — OpenAI-compatible with Claude models
-    "codemax": {
-        "name": "CodeMax",
-        "emoji": "⚡",
-        "api_base": "https://api.codemax.pro/v1",
-        "auth_header": "Bearer",
-        "env_key": "CODEMAX_API_KEY",
-        "default_model": "claude-sonnet-4-6",
-        "supports_streaming": True,
-        "supports_vision": True,
-        "models": [
-            {"id": "claude-opus-4-7",    "name": "Claude Opus 4.7",   "context": 200000, "input": 3.00,  "output": 15.00},
-            {"id": "claude-sonnet-4-6",  "name": "Claude Sonnet 4.6",  "context": 200000, "input": 3.00,  "output": 15.00},
-            {"id": "claude-3-5-haiku",   "name": "Claude 3.5 Haiku",   "context": 200000, "input": 0.80,  "output": 4.00},
-            {"id": "gpt-4o",            "name": "GPT-4o",             "context": 128000, "input": 2.50,  "output": 10.00},
-            {"id": "gpt-4o-mini",        "name": "GPT-4o Mini",        "context": 128000, "input": 0.15,  "output": 0.60},
-        ],
-    },
-
-    # ── Nous Research ─────────────────────────────────────────────────────
-    "nous": {
-        "name": "Nous Portal",
-        "emoji": "🌀",
-        "api_base": "https://api.nousresearch.com/v1",
-        "auth_header": "Bearer",
-        "env_key": "NOUS_API_KEY",
-        "default_model": "claude-sonnet-4-6",
-        "supports_streaming": True,
-        "supports_vision": True,
-        "models": [
-            {"id": "claude-sonnet-4-6",  "name": "Claude Sonnet 4.6",  "context": 200000, "input": 3.00, "output": 15.00},
-            {"id": "claude-opus-4-7",    "name": "Claude Opus 4.7",    "context": 200000, "input": 3.00, "output": 15.00},
-        ],
-    },
-
     # ── NVIDIA NIM ────────────────────────────────────────────────────────
+    # Real built-in provider — free tier available at ai.nvidia.com
     "nvidia": {
         "name": "NVIDIA NIM",
         "emoji": "🎮",
         "api_base": "https://integrate.api.nvidia.com/v1",
         "auth_header": "Bearer",
         "env_key": "NVIDIA_API_KEY",
-        "default_model": "moonshotai/kimi-k2-thinking",
+        "default_model": "meta/llama-3.1-405b-instruct",
         "supports_streaming": True,
         "supports_vision": False,
         "models": [
-            {"id": "moonshotai/kimi-k2-thinking",  "name": "Kimi K2 Thinking", "context": 32000, "input": 0.00, "output": 0.00},
-            {"id": "nvidia/llama-3.3-nemotron",   "name": "Llama 3.3 Nemotron","context": 128000,"input": 0.00, "output": 0.00},
-            {"id": "meta/llama-3.1-405b-instruct", "name": "Llama 3.1 405B",   "context": 128000,"input": 0.00, "output": 0.00},
+            {"id": "meta/llama-3.1-405b-instruct",  "name": "Llama 3.1 405B",    "context": 128000, "input": 0.00, "output": 0.00},
+            {"id": "nvidia/llama-3.3-nemotron",     "name": "Llama 3.3 Nemotron","context": 128000, "input": 0.00, "output": 0.00},
+            {"id": "mistralai/mixtral-8x7b-instruct","name": "Mixtral 8x7B",     "context": 32000,  "input": 0.00, "output": 0.00},
+        ],
+    },
+
+    # ── Nous Research ─────────────────────────────────────────────────────
+    # Real built-in provider — Nous API portal
+    "nous": {
+        "name": "Nous Portal",
+        "emoji": "🌀",
+        "api_base": "https://api.nousresearch.com/v1",
+        "auth_header": "Bearer",
+        "env_key": "NOUS_API_KEY",
+        "default_model": "meta-llama/Llama-3.3-70B-Instruct",
+        "supports_streaming": True,
+        "supports_vision": False,
+        "models": [
+            {"id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B",  "context": 128000, "input": 0.00, "output": 0.00},
+            {"id": "mistralai/Mixtral-8x22B",             "name": "Mixtral 8x22B",  "context": 64000,  "input": 0.00, "output": 0.00},
         ],
     },
 }
@@ -392,9 +374,8 @@ _KEY_MAP = {
     "mistral": "mistral_api_key",
     "together": "together_api_key",
     "cohere": "cohere_api_key",
-    "codemax": "codemax_api_key",
-    "nous": "nous_api_key",
     "nvidia": "nvidia_api_key",
+    "nous": "nous_api_key",
 }
 
 
