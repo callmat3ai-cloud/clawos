@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import (
     Qt, QPropertyAnimation, QEasingCurve, QTimer,
-    QPoint, QRect, QSize, pyqtProperty,
+    QPoint, QRect, QSize, pyqtProperty, pyqtSignal,
 )
 from PyQt6.QtGui import (
     QColor, QPainter, QPen, QBrush, QRadialGradient,
