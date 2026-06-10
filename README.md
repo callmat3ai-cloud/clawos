@@ -1,10 +1,10 @@
 # ClawOS — Desktop AI Agent
 
-Voice-first AI desktop assistant with Composio-powered app integrations, persistent memory, and a futuristic UI.
+Voice-first AI desktop assistant with Composio-powered app integrations, persistent memory, multi-profile isolation, and a futuristic dark UI.
 
 ```
-⚡ ClawOS v1.0.0
-Desktop AI Agent — Voice · Composio · Memory · Cron
+⚡ ClawOS v1.0
+Desktop AI Agent — Voice · Composio · Memory · Profiles · Cron · Skills
 ```
 
 ---
@@ -15,7 +15,8 @@ Desktop AI Agent — Voice · Composio · Memory · Cron
 - **💬 Chat Interface** — Full conversation history with persistent memory
 - **🛠️ 500+ App Integrations** — Gmail, Notion, GitHub, Slack, Linear, and more via Composio
 - **🧠 Memory** — Remembers context across sessions, auto-extraction
-- **👤 Profiles** — Isolated work/personal/client profiles
+- **👤 User Profiles** — Isolated work/personal/client environments
+- **🤖 Agent Modes** — 5 personalities: Professional, Casual, Technical, Creative, Assistant
 - **📅 Cron Jobs** — Natural language scheduling ("every morning at 9")
 - **🧠 Skill Auto-Discovery** — Learns repeated workflows and creates reusable skills
 - **🌙 Futuristic Dark UI** — Cyan/purple cyberpunk aesthetic
@@ -26,15 +27,25 @@ Desktop AI Agent — Voice · Composio · Memory · Cron
 
 - macOS (Apple Silicon or Intel)
 - Python 3.10+
-- Gemini API key (free tier available)
-- Composio API key (free tier: 20k tool calls/mo)
+- Gemini API key (free tier: 1,500 req/min at aistudio.google.com)
+- Composio API key (free tier: 20,000 calls/mo at composio.dev)
 
 ---
 
 ## Install
 
+### Quick Install (one command)
+
 ```bash
-# 1. Clone the repo
+git clone https://github.com/callmat3ai-cloud/ClawOS.git
+cd ClawOS
+chmod +x install.sh && ./install.sh
+```
+
+### Manual Install
+
+```bash
+# 1. Clone
 git clone https://github.com/callmat3ai-cloud/ClawOS.git
 cd ClawOS
 
@@ -43,9 +54,10 @@ python3 -m venv venv
 source venv/bin/activate
 
 # 3. Install dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
 
-# 4. Configure API keys
+# 4. Create config
 mkdir -p config
 cat > config/api_keys.json << 'EOF'
 {
@@ -54,9 +66,10 @@ cat > config/api_keys.json << 'EOF'
 }
 EOF
 
-# 5. Install Composio CLI (for OAuth connections)
-pip install composio-py
+# 5. (Optional) Install Composio CLI for OAuth connections
+pip install composio-cli
 composio login
+composio connect gmail github slack
 
 # 6. Run
 python main.py
@@ -64,12 +77,35 @@ python main.py
 
 ---
 
-## API Keys
+## Get API Keys
 
-| Service | Get API Key | Free Tier |
-|---------|------------|-----------|
-| Gemini | aistudio.google.com | 1,500 req/min |
-| Composio | composio.dev | 20,000 calls/mo |
+### Gemini (free)
+1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+2. Create API key
+3. Paste into `config/api_keys.json` under `gemini_api_key`
+
+### Composio (free tier: 20k calls/month)
+1. Go to [app.composio.dev/settings/api-keys](https://app.composio.dev/settings/api-keys)
+2. Create API key
+3. Paste into `config/api_keys.json` under `composio_api_key`
+
+---
+
+## Connect Apps (Composio)
+
+Once you have a Composio API key:
+
+```bash
+source venv/bin/activate
+composio login
+composio connect gmail
+composio connect github
+composio connect slack
+composio connect notion
+composio connect linear
+```
+
+Available integrations: Gmail, Calendar, Drive, Notion, GitHub, Slack, Discord, Jira, Linear, HubSpot, Airtable, Twitter/X, LinkedIn, Instagram, YouTube, Spotify, Canva, and 500+ more.
 
 ---
 
@@ -77,38 +113,90 @@ python main.py
 
 ```
 ClawOS/
-├── main.py                     # App entry point
-├── ui/futuristic_ui.py         # PyQt6 UI — orb, chat, tools, profiles
+├── main.py                     # App entry point (PyQt6)
+├── install.sh                  # macOS install script
+├── requirements.txt            # Python dependencies
+├── config/
+│   └── api_keys.json           # API keys (create this)
+├── ui/
+│   └── futuristic_ui.py        # PyQt6 UI — orb, chat, tools, profiles
 ├── agent/
-│   ├── planner.py               # LLM task decomposition
-│   ├── executor.py              # Step-by-step execution + retry
+│   ├── planner.py              # LLM task decomposition
+│   ├── executor.py             # Step-by-step execution + retry
 │   └── error_handler.py        # Auto-recovery
 ├── memory/
-│   ├── memory_manager.py        # From Brahma (extraction + compression)
-│   └── profile_manager.py       # Profile isolation + session persistence
+│   ├── memory_manager.py       # From Brahma (extraction + compression)
+│   ├── profile_manager.py      # Profile isolation + session persistence
+│   └── agent_profiles.py      # Agent personality profiles
 ├── integrations/
-│   ├── composio_mcp.py         # 500+ app integrations
-│   └── openrouter_client.py    # Fallback model routing
+│   └── composio_mcp.py        # 500+ app integrations
 ├── scheduler/
 │   └── cron_manager.py         # APScheduler cron jobs
 ├── skills/
-│   ├── skill_discovery.py      # Auto-learn workflows
-│   └── auto/                   # Auto-generated skill files
-└── actions/                    # Brahma action modules (22 total)
+│   └── skill_discovery.py      # Auto-learn workflows
+└── actions/                    # 23 action modules (Brahma + cmd_control)
     ├── browser_control.py
     ├── computer_control.py
+    ├── cmd_control.py
+    ├── file_controller.py
+    ├── office_builder.py
     └── ...
 ```
 
 ---
 
+## Agent Modes
+
+Switch between AI personalities from the sidebar:
+
+| Mode | Emoji | Use case |
+|------|-------|---------|
+| Professional | 💼 | Formal, business, concise |
+| Casual | 😎 | Friendly, conversational |
+| Technical | ⚙️ | Code-heavy, architecture-minded |
+| Creative | 🎨 | Brainstorming, design-focused |
+| Assistant | 🤖 | Balanced, general-purpose |
+
+---
+
 ## Roadmap
 
-- [ ] Voice pipeline full integration with PyQt6 UI
-- [ ] Composio OAuth connection wizard in Settings
-- [ ] mcporter integration for n8n/Zapier webhooks
-- [ ] macOS .app bundling with PyInstaller
+- [x] Composio MCP integration
+- [x] Chat interface
+- [x] Profile system (user + agent)
+- [x] Memory persistence
+- [x] Cron scheduler
+- [x] Skill auto-discovery
+- [x] Futuristic dark UI
+- [ ] Voice pipeline — connect meeting_assistant.py
+- [ ] macOS .app packaging (PyInstaller)
+- [ ] mcporter for n8n/Zapier webhooks
 - [ ] Skill marketplace sharing
+
+---
+
+## Troubleshooting
+
+**"PyQt6 not found"**
+```bash
+pip install PyQt6
+```
+
+**"No module named 'google.genai'"**
+```bash
+pip install google-genai
+```
+
+**"No module named 'sounddevice'"**
+```bash
+pip install sounddevice pyaudio
+```
+
+**"Composio API key not working"**
+```bash
+composio login
+composio check
+```
 
 ---
 

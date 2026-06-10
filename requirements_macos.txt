@@ -1,0 +1,7 @@
+# ClawOS macOS-specific requirements
+# Install system deps first:
+#   brew install portaudio
+# Then: pip install -r requirements_macos.txt
+
+-r requirements.txt
+portaudio
