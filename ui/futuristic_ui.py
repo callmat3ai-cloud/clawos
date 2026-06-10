@@ -619,53 +619,304 @@ class ClawOSWindow(QMainWindow):
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        title = QLabel("⚙️ Settings")
-        title.setStyleSheet(f"color: {C['cyan'].name()}; font-size: 20px; font-weight: 800;")
-        layout.addWidget(title)
-        layout.addSpacing(4)
-        desc = QLabel("Configure API keys and integrations")
-        desc.setStyleSheet(f"color: {C['text_muted'].name()}; font-size: 12px;")
-        layout.addWidget(desc)
-        layout.addSpacing(20)
+        # ── Header ─────────────────────────────────────────────────
+        header = QWidget()
+        header.setFixedHeight(56)
+        header.setStyleSheet(f"background: {C['bg_2'].name()}; border-bottom: 1px solid {C['border'].name()};")
+        hlayout = QHBoxLayout(header)
+        hlayout.setContentsMargins(20, 0, 20, 0)
 
-        # Composio key
-        comp_label = QLabel("Composio API Key")
-        comp_label.setStyleSheet(f"color: {C['text'].name()}; font-weight: 600;")
-        layout.addWidget(comp_label)
+        lbl = QLabel("⚙️  Settings")
+        lbl.setStyleSheet(f"color: {C['text'].name()}; font-size: 15px; font-weight: 700;")
+        hlayout.addWidget(lbl)
+        hlayout.addStretch()
 
-        comp_row = QHBoxLayout()
-        self.composio_key_input = QLineEdit()
-        self.composio_key_input.setPlaceholderText("Enter Composio API key...")
-        self.composio_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._load_composio_key()
-        comp_row.addWidget(self.composio_key_input)
+        # Close/minimize
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(28, 28)
+        close_btn.clicked.connect(lambda: self.main_area.setCurrentIndex(0))
+        hlayout.addWidget(close_btn)
+        layout.addWidget(header)
 
-        save_comp = QPushButton("Save")
-        save_comp.setObjectName("accentBtn")
-        save_comp.clicked.connect(self._save_composio_key)
-        comp_row.addWidget(save_comp)
-        layout.addLayout(comp_row)
+        # ── Scrollable content ──────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"background: {C['bg'].name()}; border: none;")
+        swidget = QWidget()
+        slayout = QVBoxLayout(swidget)
+        slayout.setContentsMargins(24, 20, 24, 40)
+        slayout.setSpacing(32)
 
-        comp_help = QLabel("Get your free key at composio.dev — 20k tool calls/mo free")
-        comp_help.setObjectName("tooltip")
-        layout.addWidget(comp_help)
+        # Section: AI Providers
+        slayout.addWidget(self._settings_section_label("🤖 AI Providers", "Choose your model provider and enter your API key"))
+        slayout.addLayout(self._build_provider_cards())
+        slayout.addWidget(QLabel())
 
-        layout.addSpacing(24)
+        # Section: Composio
+        slayout.addWidget(self._settings_section_label("🛠️ Composio Integration", "Connect 500+ apps (Gmail, GitHub, Slack, Notion...)"))
+        slayout.addLayout(self._build_composio_section())
 
-        # Model preference
-        model_label = QLabel("AI Model")
-        model_label.setStyleSheet(f"color: {C['text'].name()}; font-weight: 600;")
-        layout.addWidget(model_label)
-
-        self.model_box = QComboBox()
-        for m in ["gemini-2.5-flash", "gemini-2.5-pro", "openrouter/auto"]:
-            self.model_box.addItem(m)
-        layout.addWidget(self.model_box)
-
-        layout.addStretch()
+        slayout.addStretch()
+        scroll.setWidget(swidget)
+        layout.addWidget(scroll)
         return page
+
+    def _settings_section_label(self, title: str, subtitle: str) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(2)
+        t = QLabel(title)
+        t.setStyleSheet(f"color: {C['text'].name()}; font-size: 14px; font-weight: 700;")
+        s = QLabel(subtitle)
+        s.setStyleSheet(f"color: {C['text_muted'].name()}; font-size: 12px;")
+        v.addWidget(t)
+        v.addWidget(s)
+        return w
+
+    def _build_provider_cards(self) -> QVBoxLayout:
+        from integrations.providers import PROVIDERS
+        vbox = QVBoxLayout()
+        vbox.setSpacing(12)
+
+        self._provider_widgets = {}
+
+        for pid, pdata in PROVIDERS.items():
+            card = self._build_provider_card(pid, pdata)
+            vbox.addWidget(card)
+
+        return vbox
+
+    def _build_provider_card(self, pid: str, pdata: dict) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background: {C['bg_2'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 10px;
+                padding: 14px;
+            }}
+        """)
+
+        from integrations.providers import is_provider_configured, get_api_key_for_provider
+        is_cfg = is_provider_configured(pid)
+        key = get_api_key_for_provider(pid)
+
+        v = QVBoxLayout(frame)
+        v.setSpacing(10)
+
+        # Header row
+        h = QHBoxLayout()
+        emoji_lbl = QLabel(pdata["emoji"] + "  " + pdata["name"])
+        emoji_lbl.setStyleSheet(f"color: {C['text'].name()}; font-size: 14px; font-weight: 700;")
+        h.addWidget(emoji_lbl)
+
+        status_lbl = QLabel("✅ Connected" if is_cfg else "⚠️  Not configured")
+        status_lbl.setStyleSheet(
+            f"color: {'#22c55e' if is_cfg else C['text_muted'].name()}; "
+            f"font-size: 11px; font-weight: 600;"
+        )
+        h.addWidget(status_lbl)
+        h.addStretch()
+        v.addLayout(h)
+
+        # Model selector
+        model_row = QHBoxLayout()
+        model_lbl = QLabel("Model:")
+        model_lbl.setStyleSheet(f"color: {C['text_muted'].name()}; font-size: 12px;")
+        model_box = QComboBox()
+        model_box.setStyleSheet(f"""
+            QComboBox {{
+                background: {C['bg_3'].name()};
+                color: {C['text'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 6px;
+                padding: 5px 10px;
+                min-width: 200px;
+            }}
+        """)
+        for m in pdata.get("models", []):
+            model_box.addItem(f"{m['name']} ({m['id']})", m["id"])
+        model_row.addWidget(model_lbl)
+        model_row.addWidget(model_box)
+        model_row.addStretch()
+        v.addLayout(model_row)
+
+        # API Key row
+        key_row = QHBoxLayout()
+        key_lbl = QLabel("API Key:")
+        key_lbl.setStyleSheet(f"color: {C['text_muted'].name()}; font-size: 12px;")
+        key_input = QLineEdit()
+        key_input.setPlaceholderText(f"Enter {pdata['name']} API key...")
+        key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        key_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {C['bg_3'].name()};
+                color: {C['text'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 6px;
+                padding: 5px 10px;
+            }}
+        """)
+        if key:
+            key_input.setText(key)
+        save_btn = QPushButton("Save")
+        save_btn.setFixedWidth(60)
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C['cyan'].name()};
+                color: {C['bg'].name()};
+                border-radius: 6px;
+                padding: 5px 12px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{ background: {C['purple'].name()}; }}
+        """)
+        key_row.addWidget(key_lbl)
+        key_row.addWidget(key_input, 1)
+        key_row.addWidget(save_btn)
+        v.addLayout(key_row)
+
+        help_lbl = QLabel(f"Free tier: {pdata.get('models', [{}])[0].get('name', 'available')}. "
+                           f"Get key at {self._provider_url(pid)}")
+        help_lbl.setStyleSheet(f"color: {C['text_muted'].name()}; font-size: 11px;")
+        v.addWidget(help_lbl)
+
+        # Store refs
+        self._provider_widgets[pid] = {
+            "model_box": model_box,
+            "key_input": key_input,
+            "save_btn": save_btn,
+            "status_lbl": status_lbl,
+        }
+
+        # Save button wiring
+        def make_save(pid2, mb, ki, sl):
+            def save():
+                from integrations.providers import _load_keys, API_KEYS_PATH
+                keys = _load_keys()
+                config_map = {
+                    "openai": "openai_api_key", "anthropic": "anthropic_api_key",
+                    "gemini": "gemini_api_key", "openrouter": "openrouter_api_key",
+                    "groq": "groq_api_key", "mistral": "mistral_api_key",
+                    "perplexity": "perplexity_api_key", "cohere": "cohere_api_key",
+                    "together": "together_api_key", "deepseek": "deepseek_api_key",
+                    "xai": "xai_api_key", "ollama": "ollama_api_key",
+                }
+                keys[config_map.get(pid2, f"{pid2}_api_key")] = ki.text().strip()
+                keys[config_map.get(pid2 + "_model", f"{pid2}_model")] = mb.currentData()
+                with open(API_KEYS_PATH, "w") as f:
+                    import json as _j
+                    _j.dump(keys, f, indent=2)
+                sl.setText("✅ Saved!")
+                sl.setStyleSheet("color: #22c55e; font-size: 11px; font-weight: 600;")
+            return save
+        save_btn.clicked.connect(make_save(pid, model_box, key_input, status_lbl))
+
+        return frame
+
+    def _provider_url(self, pid: str) -> str:
+        urls = {
+            "openai": "platform.openai.com/api-keys",
+            "anthropic": "console.anthropic.com/settings/api-keys",
+            "gemini": "aistudio.google.com/apikey",
+            "openrouter": "openrouter.ai/keys",
+            "groq": "console.groq.com/keys",
+            "mistral": "console.mistral.ai/api/keys",
+            "perplexity": "console.perplexity.ai/api-keys",
+            "cohere": "dashboard.cohere.com/api-keys",
+            "together": "api.together.xyz/settings/api-keys",
+            "deepseek": "platform.deepseek.com/api-keys",
+            "xai": "console.x.ai",
+            "ollama": "ollama.com — runs locally, no key needed",
+        }
+        return urls.get(pid, "")
+
+    def _build_composio_section(self) -> QVBoxLayout:
+        vbox = QVBoxLayout()
+        vbox.setSpacing(10)
+
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background: {C['bg_2'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 10px;
+                padding: 14px;
+            }}
+        """)
+        v = QVBoxLayout(frame)
+        v.setSpacing(10)
+
+        # Key input
+        h = QHBoxLayout()
+        lbl = QLabel("🛠️  API Key:")
+        lbl.setStyleSheet(f"color: {C['text_muted'].name()}; font-size: 12px;")
+        self.composio_key_input = QLineEdit()
+        self.composio_key_input.setPlaceholderText("Enter your Composio API key...")
+        self.composio_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.composio_key_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {C['bg_3'].name()};
+                color: {C['text'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 6px;
+                padding: 6px 10px;
+            }}
+        """)
+        self._load_composio_key()
+        save_btn = QPushButton("Save")
+        save_btn.setFixedWidth(60)
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C['cyan'].name()};
+                color: {C['bg'].name()};
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{ background: {C['purple'].name()}; }}
+        """)
+        save_btn.clicked.connect(self._save_composio_key)
+        h.addWidget(lbl)
+        h.addWidget(self.composio_key_input, 1)
+        h.addWidget(save_btn)
+        v.addLayout(h)
+
+        help_lbl = QLabel("500+ app integrations • 20k calls/mo free • app.composio.dev/settings/api-keys")
+        help_lbl.setStyleSheet(f"color: {C['text_muted'].name()}; font-size: 11px;")
+        v.addWidget(help_lbl)
+
+        # Quick connect buttons
+        apps_h = QHBoxLayout()
+        apps_lbl = QLabel("Quick connect:")
+        apps_lbl.setStyleSheet(f"color: {C['text_muted'].name()}; font-size: 12px;")
+        apps_h.addWidget(apps_lbl)
+        for app in ["Gmail", "GitHub", "Slack", "Notion", "Linear"]:
+            btn = QPushButton(app)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {C['bg_3'].name()};
+                    color: {C['text'].name()};
+                    border: 1px solid {C['border'].name()};
+                    border-radius: 6px;
+                    padding: 4px 10px;
+                    font-size: 12px;
+                }}
+                QPushButton:hover {{
+                    border-color: {C['cyan'].name()};
+                    color: {C['cyan'].name()};
+                }}
+            """)
+            apps_h.addWidget(btn)
+        apps_h.addStretch()
+        v.addLayout(apps_h)
+
+        vbox.addWidget(frame)
+        return vbox
 
     def _build_tools_page(self) -> QWidget:
         page = QWidget()
@@ -688,34 +939,148 @@ class ClawOSWindow(QMainWindow):
     def _build_cron_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        title = QLabel("📅 Scheduled Tasks")
-        title.setStyleSheet(f"color: {C['cyan'].name()}; font-size: 20px; font-weight: 800;")
-        layout.addWidget(title)
-        desc = QLabel("Natural language scheduling — 'every morning at 9'")
-        desc.setObjectName("tooltip")
-        layout.addWidget(desc)
-        layout.addSpacing(12)
+        # ── Header ─────────────────────────────────────────────────
+        header = QWidget()
+        header.setFixedHeight(56)
+        header.setStyleSheet(f"background: {C['bg_2'].name()}; border-bottom: 1px solid {C['border'].name()};")
 
-        # Add job form
-        form = QHBoxLayout()
-        self.cron_input = QLineEdit()
-        self.cron_input.setPlaceholderText("every morning at 9 | every 30 minutes | every weekday at 6pm")
+        hbox = QHBoxLayout(header)
+        hbox.setContentsMargins(20, 0, 20, 0)
+
+        lbl = QLabel("📅  Cron Scheduler")
+        lbl.setStyleSheet(f"color: {C['text'].name()}; font-size: 15px; font-weight: 700;")
+        hbox.addWidget(lbl)
+
+        # Toggle all button
+        toggle_btn = QPushButton("⏸ Pause All")
+        toggle_btn.setFixedSize(100, 28)
+        toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C['bg_3'].name()};
+                color: {C['text'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 6px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                border-color: {C['cyan'].name()};
+            }}
+        """)
+        hbox.addWidget(toggle_btn)
+        layout.addWidget(header)
+
+        # ── Scrollable content ──────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"background: {C['bg'].name()}; border: none;")
+        swidget = QWidget()
+        slayout = QVBoxLayout(swidget)
+        slayout.setContentsMargins(20, 16, 20, 24)
+        slayout.setSpacing(12)
+
+        # ── New job form (Hermes-style card) ────────────────────────
+        form_card = QFrame()
+        form_card.setStyleSheet(f"""
+            QFrame {{
+                background: {C['bg_2'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 10px;
+                padding: 14px;
+            }}
+        """)
+        form_v = QVBoxLayout(form_card)
+        form_v.setSpacing(10)
+
+        # Trigger row
+        trigger_row = QHBoxLayout()
+        trigger_lbl = QLabel("🔁  Trigger")
+        trigger_lbl.setStyleSheet(f"color: {C['text'].name()}; font-size: 13px; font-weight: 700;")
+        trigger_row.addWidget(trigger_lbl)
+        trigger_row.addStretch()
+
+        # Natural language input
+        self.cron_natural_input = QLineEdit()
+        self.cron_natural_input.setPlaceholderText("e.g. every morning at 9, every weekday at 6pm, every 30 minutes")
+        self.cron_natural_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {C['bg_3'].name()};
+                color: {C['text'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: {C['cyan'].name()};
+            }}
+        """)
+        form_v.addWidget(self.cron_natural_input)
+
+        # Action input
+        action_row = QHBoxLayout()
+        action_lbl = QLabel("⚡  Action")
+        action_lbl.setStyleSheet(f"color: {C['text'].name()}; font-size: 13px; font-weight: 700;")
+        action_row.addWidget(action_lbl)
+        action_row.addStretch()
+
         self.cron_action_input = QLineEdit()
-        self.cron_action_input.setPlaceholderText("What should it do?")
-        form.addWidget(self.cron_input, 1)
-        form.addWidget(self.cron_action_input, 1)
+        self.cron_action_input.setPlaceholderText("What should ClawOS do? (e.g. check my emails and summarize)")
+        self.cron_action_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {C['bg_3'].name()};
+                color: {C['text'].name()};
+                border: 1px solid {C['border'].name()};
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: {C['cyan'].name()};
+            }}
+        """)
+        form_v.addWidget(self.cron_action_input)
 
-        add_cron_btn = QPushButton("+ Schedule")
-        add_cron_btn.setObjectName("accentBtn")
-        add_cron_btn.clicked.connect(self._add_cron_job)
-        form.addWidget(add_cron_btn)
-        layout.addLayout(form)
+        # Schedule button
+        add_btn = QPushButton("📅  Schedule Task")
+        add_btn.setFixedHeight(38)
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C['cyan'].name()};
+                color: {C['bg'].name()};
+                border-radius: 8px;
+                font-weight: 700;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background: {C['purple'].name()};
+            }}
+        """)
+        add_btn.clicked.connect(self._add_cron_job)
+        form_v.addWidget(add_btn)
 
-        layout.addSpacing(12)
-        self.cron_list = QListWidget()
-        layout.addWidget(self.cron_list)
+        slayout.addWidget(form_card)
+
+        # ── Jobs list ──────────────────────────────────────────────
+        jobs_label = QLabel("🗂  Scheduled Tasks")
+        jobs_label.setStyleSheet(f"color: {C['text'].name()}; font-size: 14px; font-weight: 700;")
+        slayout.addWidget(jobs_label)
+
+        self.cron_jobs_container = QWidget()
+        self.cron_jobs_layout = QVBoxLayout(self.cron_jobs_container)
+        self.cron_jobs_layout.setContentsMargins(0, 0, 0, 0)
+        self.cron_jobs_layout.setSpacing(8)
+        slayout.addWidget(self.cron_jobs_container)
+
+        slayout.addStretch()
+        scroll.setWidget(swidget)
+        layout.addWidget(scroll)
+
+        # Load existing jobs
+        self._load_cron_jobs()
+
         return page
 
     def _build_skills_page(self) -> QWidget:
@@ -998,7 +1363,7 @@ class ClawOSWindow(QMainWindow):
                 pass
 
     def _add_cron_job(self):
-        cron_text = self.cron_input.text().strip()
+        cron_text = self.cron_natural_input.text().strip()
         action = self.cron_action_input.text().strip()
         if not cron_text or not action:
             return
@@ -1009,7 +1374,7 @@ class ClawOSWindow(QMainWindow):
                 natural_cron=cron_text,
                 action=action,
             )
-            self.cron_input.clear()
+            self.cron_natural_input.clear()
             self.cron_action_input.clear()
             self._load_cron_jobs()
         except Exception as e:

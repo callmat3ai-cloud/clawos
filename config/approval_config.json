@@ -1,0 +1,23 @@
+{
+  "approval_mode": "manual",
+  "timeout_seconds": 60,
+  "skip_trusted_actions": false,
+  "allowed_tools": [
+    "web_search",
+    "file_controller",
+    "browser_control",
+    "send_message",
+    "reminder",
+    "weather_report",
+    "youtube_video",
+    "open_app",
+    "screen_process",
+    "computer_control"
+  ],
+  "redact_secrets": true,
+  "streaming_enabled": true,
+  "max_agent_steps": 90,
+  "subagent_max_parallel": 3,
+  "subagent_timeout": 600,
+  "tool_enforcement": "auto"
+}
