@@ -64,6 +64,13 @@ class ClawOSApp:
         self._current_session_id: str | None = None
         self._processing = False
 
+        # ── Create QApplication FIRST (before any Qt widgets) ──────────
+        self._qapp = QApplication.instance()
+        if self._qapp is None:
+            self._qapp = QApplication(sys.argv)
+            self._qapp.setApplicationName("ClawOS")
+            self._qapp.setStyle("Fusion")
+
         # ── Load all subsystems ────────────────────────────────
         self._voice_engine = None
         self._memory_engine = None
@@ -71,7 +78,7 @@ class ClawOSApp:
         self._messaging_hub = None
         self._mcp_manager = None
 
-        # Import UI
+        # Import UI (safe now — QApplication exists)
         from clawos_ui import ClawOSWindow
 
         self.window = ClawOSWindow()
@@ -218,14 +225,10 @@ class ClawOSApp:
             self._proactive.set_streaming_active(streaming_active)
 
     def start(self):
-        app = QApplication(sys.argv)
-        app.setApplicationName("ClawOS")
-        app.setStyle("Fusion")
-        app.setQuitOnLastWindowClosed(False)
-
+        self._qapp.setQuitOnLastWindowClosed(False)
         self.window.show()
         self._print_banner()
-        sys.exit(app.exec())
+        sys.exit(self._qapp.exec())
 
     def _print_banner(self):
         print()
